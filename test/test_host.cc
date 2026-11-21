@@ -172,6 +172,11 @@ static void testUiFlow() {
     ev(Type::Tap, 30, 120);
     CHECK(cam.calls.size() == 2 && cam.calls[0] == "iris 6.30" && cam.calls[1] == "iris 5.00");
     CHECK(ev(Type::SwipeDown) && u.screen() == ui::Screen::Main);
+    ev(Type::Tap, 120, 90); CHECK(u.screen() == ui::Screen::Iris);
+    CHECK(ev(Type::Tap, 120, 214) && u.screen() == ui::Screen::Main); // tap "back"
+    ev(Type::Tap, 120, 90);
+    CHECK(ev(Type::SwipeUp) && u.screen() == ui::Screen::Main);
+    CHECK(!ev(Type::SwipeUp) && u.screen() == ui::Screen::Main); // nothing on MAIN
 
     cam.calls.clear();
     ev(Type::Tap, 70, 160); CHECK(u.screen() == ui::Screen::Wb);

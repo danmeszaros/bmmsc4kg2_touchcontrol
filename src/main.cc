@@ -79,6 +79,7 @@ int main() {
     bool dirty = false;
     uint32_t nextTouch = 0;
     bool touchWasDown = false;
+    int touchLastX = 0, touchLastY = 0, touchSamples = 0;
 
     for (;;) {
         watchdog_update();
@@ -98,7 +99,14 @@ int main() {
         if ((int32_t)(now - nextTouch) >= 0) {
             nextTouch = now + kTouchPollMs;
             touch::Sample t = touch::read();
-            if (TOUCH_LOG && t.down != touchWasDown) printf("touch: %s %d,%d\n", t.down ? "down" : "up", t.x, t.y);
+            if (TOUCH_LOG && t.down && !touchWasDown) printf("touch: down %d,%d\n", t.x, t.y);
+            if (TOUCH_LOG && !t.down && touchWasDown)
+                printf("touch: up, last %d,%d after %d samples\n", touchLastX, touchLastY, touchSamples);
+            if (t.down) {
+                touchSamples = touchWasDown ? touchSamples + 1 : 1;
+                touchLastX = t.x;
+                touchLastY = t.y;
+            }
             touchWasDown = t.down;
             gesture::Event g = gestures.update(t.down, t.x, t.y, now);
             if (g.type != gesture::Type::None) {

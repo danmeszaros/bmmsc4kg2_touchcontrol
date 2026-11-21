@@ -32,6 +32,7 @@ static constexpr int kBackY = 214;
 // edit screens: tap left / right of these x for -/+
 static constexpr int kMinusX = 92, kPlusX = 148;
 static constexpr Rect kAutoWb{CX - 50, 140, CX + 50, 192};
+static constexpr Rect kBack{CX - 50, 198, CX + 50, 240};
 static constexpr Rect kGainLow{30, 72, 118, 168};
 static constexpr Rect kGainHigh{122, 72, 210, 168};
 // audio
@@ -312,11 +313,10 @@ bool Ui::onGesture(const gesture::Event& ev, const CamState& s, CameraCtl& cam, 
         fpsPending_ = -1;
         return true;
     case Type::SwipeDown:
+    case Type::SwipeUp: // either vertical swipe leaves an edit screen
         if (page) return false;
         screen_ = Screen::Main;
         return true;
-    case Type::SwipeUp:
-        return false;
     case Type::Tap:
         return onTap(ev.x, ev.y, false, s, cam, nowMs);
     case Type::Repeat:
@@ -328,6 +328,12 @@ bool Ui::onGesture(const gesture::Event& ev, const CamState& s, CameraCtl& cam, 
 
 bool Ui::onTap(int x, int y, bool repeat, const CamState& s, CameraCtl& cam, uint32_t nowMs) {
     const int dir = x < kMinusX ? -1 : x >= kPlusX ? 1 : 0;
+    // edit screens: the "back" hint at the bottom is a button too
+    if (!repeat && kBack.contains(x, y) &&
+        (screen_ == Screen::Iris || screen_ == Screen::Wb || screen_ == Screen::Gain)) {
+        screen_ = Screen::Main;
+        return true;
+    }
     switch (screen_) {
     case Screen::Main:
         if (repeat) return false;

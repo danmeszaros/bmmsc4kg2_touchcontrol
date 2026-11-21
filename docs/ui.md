@@ -22,8 +22,9 @@ least ~68 px (9 mm). Mockups: `mockups/` (rendered by `tools/render_mockups.py`)
 After 15 s without touch every screen returns to MAIN. The red REC ring is shown on all screens.
 Firmware renders of every screen: `test/run.sh` → `test/out/*.png`.
 
-## Edit screens (from MAIN, swipe down = back)
+## Edit screens (from MAIN)
 
+- Back to MAIN: swipe down or up, or tap "▾ back".
 - **IRIS** (`mockups/E1_iris.png`): tap left/right half = −/+ 1/3 stop, arc shows the position between the lens's limits.
 - **WB** (`mockups/E2_wb.png`): ±100 K (limited to 2500–10000), AUTO button (`doAuto`).
 - **BASE GAIN** (`mockups/E3_gain.png`): LOW (0 dB, ISO 400) / HIGH (+18 dB, ISO 3200).
