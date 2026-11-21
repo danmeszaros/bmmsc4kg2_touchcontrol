@@ -1,0 +1,9 @@
+; 8N1 UART transmitter, 8 PIO cycles per bit (clkdiv = sys_clk / (8 * baud)).
+; Debug log on GP27 (no hardware UART function there). From pico-examples.
+.program uart_tx
+.side_set 1 opt
+    pull       side 1 [7]  ; stop bit / idle
+    set x, 7   side 0 [7]  ; start bit
+bitloop:
+    out pins, 1            ; LSB first
+    jmp x-- bitloop   [6]
