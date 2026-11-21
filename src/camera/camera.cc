@@ -14,38 +14,39 @@ constexpr const char* kApi = "/control/api/v1/";
 constexpr uint32_t kTimeoutMs = 500;
 constexpr uint32_t kRecLockMs = 1500;     // after STOP (camera needs ~1.2 s)
 constexpr uint32_t kRecStartLockMs = 500; // after START
-constexpr uint32_t kProbeMs = 1000;   // while offline
-constexpr int kOfflineAfter = 3;      // consecutive failures
-
-// poll period per polled Op, ms
-constexpr uint32_t kPollMs[] = {
-    300,  // GetRecord
-    1000, // GetIris
-    1000, // GetWb
-    2000, // GetTint
-    1000, // GetGain
-    5000, // GetFormat
-    5000, // GetWorkingset
-};
+constexpr uint32_t kProbeMs = 1000;       // while offline
+constexpr int kOfflineAfter = 3;          // consecutive failures
 
 struct OpDef { const char* method; const char* path; const char* body; };
 
-// indexed by Camera::Op
+// indexed by Camera::Op; %d = audio channel
 constexpr OpDef kOps[] = {
     {"GET", "transports/0/record", nullptr},
     {"GET", "lens/iris", nullptr},
+    {"GET", "lens/zoom", nullptr},
     {"GET", "video/whiteBalance", nullptr},
     {"GET", "video/whiteBalanceTint", nullptr},
     {"GET", "video/gain", nullptr},
     {"GET", "system/format", nullptr},
     {"GET", "media/workingset", nullptr},
+    {"GET", "audio/channel/%d/input", nullptr},
+    {"GET", "audio/channel/%d/level", nullptr},
+    {"GET", "audio/channel/%d/input/description", nullptr},
     {"GET", "video/autoExposure", nullptr},
     {"PUT", "video/autoExposure", "{\"mode\":\"Off\",\"type\":\"\"}"},
     {"PUT", "video/shutter", "{\"shutterAngle\":18000}"},
     {"PUT", "transports/0/record", "{\"recording\":true}"},
     {"PUT", "transports/0/record", "{\"recording\":false}"},
     {"PUT", "lens/focus/doAutoFocus", nullptr},
+    {"PUT", "lens/iris", nullptr},
+    {"PUT", "video/whiteBalance", nullptr},
+    {"PUT", "video/whiteBalance/doAuto", nullptr},
+    {"PUT", "video/gain", nullptr},
+    {"PUT", "audio/channel/%d/input", nullptr},
+    {"PUT", "audio/channel/%d/level", nullptr},
+    {"PUT", "system/format", nullptr},
 };
+static_assert(sizeof(kOps) / sizeof(kOps[0]) == 24, "kOps must match Camera::Op");
 
 const char* resultName(HttpResult r) {
     switch (r) {
@@ -62,9 +63,16 @@ const char* resultName(HttpResult r) {
     }
 }
 
+std::string pathOf(const OpDef& d, int ch) {
+    char p[64];
+    std::snprintf(p, sizeof p, d.path, ch);
+    return p;
+}
+
 } // namespace
 
 void Camera::setLink(bool up, uint32_t nowMs) {
+    now_ = nowMs;
     if (up == st_.link) return;
     st_.link = up;
     printf("cam: usb %s\n", up ? "up" : "down");
@@ -84,43 +92,63 @@ void Camera::onLease(const uint8_t ip[4]) {
     printf("cam: lease %u.%u.%u.%u\n", ip[0], ip[1], ip[2], ip[3]);
 }
 
-void Camera::enqueue(Op op) {
-    if (queued(op) || qLen_ == kQueue) return;
-    queue_[(qHead_ + qLen_) % kQueue] = op;
+void Camera::enqueue(Op op, uint8_t ch, std::string body) {
+    // a newer value for the same setting replaces the queued one
+    for (int i = 0; i < qLen_; ++i) {
+        Cmd& c = queue_[(qHead_ + i) % kQueue];
+        if (c.op == op && c.ch == ch) {
+            c.body = std::move(body);
+            return;
+        }
+    }
+    if (qLen_ == kQueue) {
+        printf("cam: queue full, dropped %s\n", kOps[(int)op].path);
+        return;
+    }
+    Cmd& c = queue_[(qHead_ + qLen_) % kQueue];
+    c.op = op;
+    c.ch = ch;
+    c.body = std::move(body);
     ++qLen_;
 }
 
 bool Camera::queued(Op op) const {
     for (int i = 0; i < qLen_; ++i) {
-        if (queue_[(qHead_ + i) % kQueue] == op) return true;
+        if (queue_[(qHead_ + i) % kQueue].op == op) return true;
     }
-    return inFlight_ && curOp_ == op;
+    return inFlight_ && cur_.op == op;
 }
 
-void Camera::startRequest(Op op, bool freshConn, uint32_t nowMs) {
-    const OpDef& d = kOps[(int)op];
+void Camera::pollSoon(Op op, uint8_t ch, uint32_t inMs) {
+    for (int i = 0; i < pollCount_; ++i) {
+        if (polls_[i].op == op && polls_[i].ch == ch) polls_[i].due = now_ + inMs;
+    }
+}
+
+void Camera::startRequest(const Cmd& cmd, bool freshConn, uint32_t nowMs) {
+    const OpDef& d = kOps[(int)cmd.op];
     auto req = std::make_unique<HttpRequest>();
     std::vector<std::string> headers{"Accept: application/json"};
-    std::string body = d.body ? d.body : "";
+    std::string body = !cmd.body.empty() ? cmd.body : (d.body ? d.body : "");
     if (!body.empty()) headers.push_back("Content-Type: application/json");
-    req->bytes = HttpRequest::build(d.method, std::string(kApi) + d.path, kHost, headers, body);
-    req->id = (uint16_t)op;
+    req->bytes = HttpRequest::build(d.method, std::string(kApi) + pathOf(d, cmd.ch), kHost, headers, body);
+    req->id = (uint16_t)cmd.op;
     req->timeoutMs = kTimeoutMs;
     req->policy = ConnPolicy::Keep;
     req->newConnection = freshConn;
     if (http_.start(std::move(req))) {
         inFlight_ = true;
-        curOp_ = op;
+        cur_ = cmd;
         curFresh_ = freshConn;
-        if ((int)op < kPollCount) pollDue_[(int)op] = nowMs + kPollMs[(int)op];
+        for (int i = 0; i < pollCount_; ++i) {
+            if (polls_[i].op == cmd.op && polls_[i].ch == cmd.ch) polls_[i].due = nowMs + polls_[i].periodMs;
+        }
     }
 }
 
 void Camera::onHttpDone(const HttpRequest& req) {
     // only copy out; acted upon in poll()
     haveDone_ = true;
-    doneOp_ = (Op)req.id;
-    doneFresh_ = curFresh_;
     doneResult_ = req.result;
     doneReused_ = req.reused;
     doneStatus_ = req.parser.status();
@@ -137,29 +165,49 @@ void Camera::wentOnline(uint32_t nowMs) {
     // manual exposure and 180 deg shutter every time the camera appears
     enqueue(Op::GetAutoExposure);
     enqueue(Op::PutShutter180);
-    for (int i = 0; i < kPollCount; ++i) pollDue_[i] = nowMs;
+    const Poll table[] = {
+        {Op::GetRecord, 0, 300, nowMs},     {Op::GetIris, 0, 1000, nowMs},
+        {Op::GetZoom, 0, 2000, nowMs},      {Op::GetWb, 0, 1000, nowMs},
+        {Op::GetTint, 0, 2000, nowMs},      {Op::GetGain, 0, 1000, nowMs},
+        {Op::GetFormat, 0, 5000, nowMs},    {Op::GetWorkingset, 0, 5000, nowMs},
+        {Op::GetAudioInput, 0, 3000, nowMs}, {Op::GetAudioInput, 1, 3000, nowMs},
+        {Op::GetAudioLevel, 0, 2000, nowMs}, {Op::GetAudioLevel, 1, 2000, nowMs},
+        {Op::GetAudioDesc, 0, 30000, nowMs}, {Op::GetAudioDesc, 1, 30000, nowMs},
+    };
+    pollCount_ = 0;
+    for (const Poll& p : table) polls_[pollCount_++] = p;
     changed();
 }
 
 void Camera::wentOffline() {
     if (st_.online) printf("cam: offline\n");
-    st_.online = false;
-    st_.recKnown = st_.irisKnown = st_.wbKnown = st_.tintKnown = st_.gainKnown = false;
-    st_.remainingSec = -1;
-    st_.fps[0] = 0;
+    const bool link = st_.link;
+    const uint32_t seq = st_.seq;
+    st_ = CamState();
+    st_.link = link;
+    st_.seq = seq;
     qLen_ = 0;
     failures_ = 0;
+    pollCount_ = 0;
+    formatBody_.clear();
     changed();
 }
 
-void Camera::handleOk(Op op, int status, const std::string& body, uint32_t nowMs) {
+void Camera::handleOk(const Cmd& cmd, int status, const std::string& body, uint32_t nowMs) {
+    const Op op = cmd.op;
     if (status >= 300) {
-        printf("cam: %s %s -> %d %.60s\n", kOps[(int)op].method, kOps[(int)op].path, status, body.c_str());
+        printf("cam: %s %s -> %d %.60s\n", kOps[(int)op].method, pathOf(kOps[(int)op], cmd.ch).c_str(), status,
+               body.c_str());
+        // a rejected setter: fetch the real value again
+        if (op == Op::PutAudioLevel) { holdUntil_[H_ALVL0 + cmd.ch] = 0; pollSoon(Op::GetAudioLevel, cmd.ch, 0); }
+        if (op == Op::PutAudioInput) { holdUntil_[H_AIN0 + cmd.ch] = 0; pollSoon(Op::GetAudioInput, cmd.ch, 0); }
+        if (op == Op::PutFormat) { holdUntil_[H_FPS] = 0; pollSoon(Op::GetFormat, 0, 0); }
         return;
     }
     double d;
     bool b;
     std::string s;
+    AudioChannel* a = cmd.ch < 2 ? &st_.audio[cmd.ch] : nullptr;
     switch (op) {
     case Op::GetRecord:
         if (json::boolean(body, "recording", b)) {
@@ -171,36 +219,49 @@ void Camera::handleOk(Op op, int status, const std::string& body, uint32_t nowMs
             }
         }
         break;
-    case Op::GetIris:
-        if (json::number(body, "apertureStop", d) && (!st_.irisKnown || std::fabs(st_.irisStop - d) > 0.01)) {
+    case Op::GetIris: {
+        double n = st_.irisNorm;
+        json::number(body, "normalised", n);
+        if (!held(H_IRIS) && json::number(body, "apertureStop", d) &&
+            (!st_.irisKnown || std::fabs(st_.irisStop - d) > 0.01 || std::fabs(st_.irisNorm - n) > 0.005)) {
             st_.irisStop = (float)d;
+            st_.irisNorm = (float)n;
             st_.irisKnown = true;
             changed();
         }
         break;
+    }
+    case Op::GetZoom:
+        if (json::number(body, "focalLength", d) && (!st_.zoomKnown || st_.focalLength != (int)d)) {
+            st_.focalLength = (int)d;
+            st_.zoomKnown = true;
+            changed();
+        }
+        break;
     case Op::GetWb:
-        if (json::number(body, "whiteBalance", d) && (!st_.wbKnown || st_.wb != (int)d)) {
+        if (!held(H_WB) && json::number(body, "whiteBalance", d) && (!st_.wbKnown || st_.wb != (int)d)) {
             st_.wb = (int)d;
             st_.wbKnown = true;
             changed();
         }
         break;
     case Op::GetTint:
-        if (json::number(body, "whiteBalanceTint", d) && (!st_.tintKnown || st_.tint != (int)d)) {
+        if (!held(H_TINT) && json::number(body, "whiteBalanceTint", d) && (!st_.tintKnown || st_.tint != (int)d)) {
             st_.tint = (int)d;
             st_.tintKnown = true;
             changed();
         }
         break;
     case Op::GetGain:
-        if (json::number(body, "gain", d) && (!st_.gainKnown || st_.gain != (int)d)) {
+        if (!held(H_GAIN) && json::number(body, "gain", d) && (!st_.gainKnown || st_.gain != (int)d)) {
             st_.gain = (int)d;
             st_.gainKnown = true;
             changed();
         }
         break;
     case Op::GetFormat:
-        if (json::string(body, "frameRate", s) && s != st_.fps) {
+        formatBody_ = body;
+        if (!held(H_FPS) && json::string(body, "frameRate", s) && s != st_.fps) {
             std::snprintf(st_.fps, sizeof st_.fps, "%s", s.c_str());
             changed();
         }
@@ -211,6 +272,37 @@ void Camera::handleOk(Op op, int status, const std::string& body, uint32_t nowMs
             changed();
         }
         break;
+    case Op::GetAudioInput:
+        if (a && !held((Hold)(H_AIN0 + cmd.ch)) && json::string(body, "input", s) &&
+            (!a->inputKnown || s != a->input)) {
+            std::snprintf(a->input, sizeof a->input, "%s", s.c_str());
+            a->inputKnown = true;
+            a->rangeKnown = false;
+            pollSoon(Op::GetAudioDesc, cmd.ch, 0);
+            pollSoon(Op::GetAudioLevel, cmd.ch, 0);
+            changed();
+        }
+        break;
+    case Op::GetAudioLevel:
+        if (a && !held((Hold)(H_ALVL0 + cmd.ch)) && json::number(body, "gain", d) &&
+            (!a->gainKnown || std::fabs(a->gain - d) > 0.05)) {
+            a->gain = (float)d;
+            a->gainKnown = true;
+            changed();
+        }
+        break;
+    case Op::GetAudioDesc: {
+        double mn, mx;
+        if (a && json::number(body, "Min", mn) && json::number(body, "Max", mx)) {
+            if (!a->rangeKnown || a->gainMin != (float)mn || a->gainMax != (float)mx) {
+                a->gainMin = (float)mn;
+                a->gainMax = (float)mx;
+                a->rangeKnown = true;
+                changed();
+            }
+        }
+        break;
+    }
     case Op::GetAutoExposure:
         if (json::string(body, "mode", s) && s != "Off") {
             printf("cam: auto exposure was %s, switching off\n", s.c_str());
@@ -219,7 +311,24 @@ void Camera::handleOk(Op op, int status, const std::string& body, uint32_t nowMs
         break;
     case Op::PutRecordOn:
     case Op::PutRecordOff:
-        pollDue_[(int)Op::GetWorkingset] = nowMs; // clip count / space changed
+        pollSoon(Op::GetWorkingset, 0, 0); // clip count / space changed
+        break;
+    case Op::PutIris:
+        pollSoon(Op::GetIris, 0, 400); // lens needs ~0.3 s
+        break;
+    case Op::PutAutoWb:
+        holdUntil_[H_WB] = holdUntil_[H_TINT] = 0;
+        pollSoon(Op::GetWb, 0, 300); // result is there after ~0.2 s
+        pollSoon(Op::GetTint, 0, 300);
+        break;
+    case Op::PutAudioInput:
+        pollSoon(Op::GetAudioDesc, cmd.ch, 0); // gain range and gain follow the input
+        holdUntil_[H_ALVL0 + cmd.ch] = 0;
+        pollSoon(Op::GetAudioLevel, cmd.ch, 0);
+        break;
+    case Op::PutFormat:
+        enqueue(Op::PutShutter180); // the camera keeps the shutter time, not the angle
+        pollSoon(Op::GetFormat, 0, 300);
         break;
     default:
         break;
@@ -227,21 +336,23 @@ void Camera::handleOk(Op op, int status, const std::string& body, uint32_t nowMs
 }
 
 void Camera::poll(uint32_t nowMs) {
+    now_ = nowMs;
     http_.poll();
 
     if (haveDone_) {
         haveDone_ = false;
         inFlight_ = false;
+        const Cmd cmd = cur_;
         if (doneResult_ == HttpResult::Ok) {
             failures_ = 0;
             if (!st_.online) wentOnline(nowMs);
-            handleOk(doneOp_, doneStatus_, doneBody_, nowMs);
+            handleOk(cmd, doneStatus_, doneBody_, nowMs);
         } else {
-            printf("cam: %s %s failed: %s%s\n", kOps[(int)doneOp_].method, kOps[(int)doneOp_].path,
+            printf("cam: %s %s failed: %s%s\n", kOps[(int)cmd.op].method, pathOf(kOps[(int)cmd.op], cmd.ch).c_str(),
                    resultName(doneResult_), doneReused_ ? " (reused conn)" : "");
-            if (doneResult_ != HttpResult::LinkDown && doneReused_ && !doneFresh_) {
+            if (doneResult_ != HttpResult::LinkDown && doneReused_ && !curFresh_) {
                 // stale kept connection: retry once right away on a new one
-                startRequest(doneOp_, true, nowMs);
+                startRequest(cmd, true, nowMs);
                 return;
             }
             if (++failures_ >= kOfflineAfter && st_.online) wentOffline();
@@ -255,33 +366,41 @@ void Camera::poll(uint32_t nowMs) {
         // probe until the camera answers
         if ((int32_t)(nowMs - nextProbeMs_) >= 0) {
             nextProbeMs_ = nowMs + kProbeMs;
-            startRequest(Op::GetRecord, true, nowMs);
+            Cmd probe;
+            probe.op = Op::GetRecord;
+            startRequest(probe, true, nowMs);
         }
         return;
     }
 
     if (qLen_ > 0) {
-        Op op = queue_[qHead_];
+        Cmd cmd = std::move(queue_[qHead_]);
         qHead_ = (qHead_ + 1) % kQueue;
         --qLen_;
-        startRequest(op, false, nowMs);
+        startRequest(cmd, false, nowMs);
         return;
     }
 
     // most overdue poll
     int best = -1;
     int32_t bestLate = -1;
-    for (int i = 0; i < kPollCount; ++i) {
-        int32_t late = (int32_t)(nowMs - pollDue_[i]);
+    for (int i = 0; i < pollCount_; ++i) {
+        int32_t late = (int32_t)(nowMs - polls_[i].due);
         if (late >= 0 && late > bestLate) {
             best = i;
             bestLate = late;
         }
     }
-    if (best >= 0) startRequest((Op)best, false, nowMs);
+    if (best >= 0) {
+        Cmd c;
+        c.op = polls_[best].op;
+        c.ch = polls_[best].ch;
+        startRequest(c, false, nowMs);
+    }
 }
 
 void Camera::toggleRecord(uint32_t nowMs) {
+    now_ = nowMs;
     if (!st_.online) return;
     if ((int32_t)(nowMs - recLockUntilMs_) < 0 || queued(Op::PutRecordOn) || queued(Op::PutRecordOff)) {
         printf("cam: rec button ignored (busy)\n");
@@ -304,4 +423,83 @@ void Camera::autoFocus() {
     if (!st_.online) return;
     enqueue(Op::PutAutoFocus);
     printf("cam: autofocus\n");
+}
+
+void Camera::setIris(float stop) {
+    if (!st_.online) return;
+    char b[48];
+    std::snprintf(b, sizeof b, "{\"apertureStop\":%.2f}", (double)stop);
+    enqueue(Op::PutIris, 0, b);
+    st_.irisStop = stop;
+    hold(H_IRIS);
+    changed();
+}
+
+void Camera::setWb(int kelvin) {
+    if (!st_.online) return;
+    char b[40];
+    std::snprintf(b, sizeof b, "{\"whiteBalance\":%d}", kelvin);
+    enqueue(Op::PutWb, 0, b);
+    st_.wb = kelvin;
+    hold(H_WB);
+    changed();
+}
+
+void Camera::autoWb() {
+    if (!st_.online) return;
+    enqueue(Op::PutAutoWb);
+    printf("cam: auto WB\n");
+}
+
+void Camera::setGain(int db) {
+    if (!st_.online) return;
+    char b[32];
+    std::snprintf(b, sizeof b, "{\"gain\":%d}", db);
+    enqueue(Op::PutGain, 0, b);
+    st_.gain = db;
+    hold(H_GAIN);
+    changed();
+}
+
+void Camera::setAudioInput(int ch, const char* input) {
+    if (!st_.online || ch < 0 || ch > 1) return;
+    std::string b = std::string("{\"input\":\"") + input + "\"}";
+    enqueue(Op::PutAudioInput, (uint8_t)ch, b);
+    AudioChannel& a = st_.audio[ch];
+    std::snprintf(a.input, sizeof a.input, "%s", input);
+    a.inputKnown = true;
+    a.rangeKnown = false; // new input, new range
+    hold((Hold)(H_AIN0 + ch));
+    changed();
+}
+
+void Camera::setAudioGain(int ch, float db) {
+    if (!st_.online || ch < 0 || ch > 1) return;
+    char b[40];
+    std::snprintf(b, sizeof b, "{\"gain\":%.1f}", (double)db);
+    enqueue(Op::PutAudioLevel, (uint8_t)ch, b);
+    st_.audio[ch].gain = db;
+    hold((Hold)(H_ALVL0 + ch));
+    changed();
+}
+
+void Camera::setFps(const char* fps) {
+    if (!st_.online) return;
+    // the camera only accepts the complete format object: take the last GET
+    // and replace frameRate
+    std::string body = formatBody_;
+    size_t k = body.find("\"frameRate\"");
+    size_t q1 = k == std::string::npos ? k : body.find('"', body.find(':', k));
+    size_t q2 = q1 == std::string::npos ? q1 : body.find('"', q1 + 1);
+    if (q2 == std::string::npos) {
+        printf("cam: no format known yet, fps not set\n");
+        pollSoon(Op::GetFormat, 0, 0);
+        return;
+    }
+    body.replace(q1 + 1, q2 - q1 - 1, fps);
+    enqueue(Op::PutFormat, 0, body);
+    std::snprintf(st_.fps, sizeof st_.fps, "%s", fps);
+    hold(H_FPS, 2000);
+    printf("cam: fps %s\n", fps);
+    changed();
 }

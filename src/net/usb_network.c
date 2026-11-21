@@ -10,6 +10,7 @@
 #include <netif/ethernet.h>
 #include <pico/stdlib.h>
 #include <pico/unique_id.h>
+#include <stdio.h>
 #include <string.h>
 #include <tusb.h>
 
@@ -70,6 +71,7 @@ static err_t netif_init_cb(struct netif *netif) {
 /* TinyUSB network driver callbacks --------------------------------------- */
 
 void tud_network_init_cb(void) {
+  printf("usb: network interface initialised by host\n");
   // (re)initialisation by the host: drop a leftover frame
   if (received_frame) {
     pbuf_free(received_frame);

@@ -2,15 +2,20 @@
 // docs/controller-guide.md): one kept-alive connection, one request at a
 // time, commands before polls, one retry on a fresh connection.
 //
+// Setters update CamState at once (optimistic) and hold that field against
+// polls for a moment, because the lens takes ~0.3 s and a poll already in
+// flight would still report the old value.
+//
 // Call everything from the main loop (lwIP context).
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include "cam_state.h"
 #include "http_client.h"
 
-class Camera : public HttpListener {
+class Camera : public HttpListener, public CameraCtl {
 public:
     Camera() : http_(*this) {}
 
@@ -22,6 +27,15 @@ public:
     void toggleRecord(uint32_t nowMs);
     void autoFocus();
 
+    // CameraCtl (touch UI)
+    void setIris(float stop) override;
+    void setWb(int kelvin) override;
+    void autoWb() override;
+    void setGain(int db) override;
+    void setAudioInput(int ch, const char* input) override;
+    void setAudioGain(int ch, float db) override;
+    void setFps(const char* fps) override;
+
     const CamState& state() const { return st_; }
 
     // HttpListener
@@ -31,43 +45,64 @@ public:
 private:
     enum class Op : uint8_t {
         // polls
-        GetRecord, GetIris, GetWb, GetTint, GetGain, GetFormat, GetWorkingset,
+        GetRecord, GetIris, GetZoom, GetWb, GetTint, GetGain, GetFormat, GetWorkingset,
+        GetAudioInput, GetAudioLevel, GetAudioDesc,
         // session setup
         GetAutoExposure, PutAutoExposureOff, PutShutter180,
         // commands
         PutRecordOn, PutRecordOff, PutAutoFocus,
+        PutIris, PutWb, PutAutoWb, PutGain, PutAudioInput, PutAudioLevel, PutFormat,
         Count
     };
-    static constexpr int kPollCount = (int)Op::GetWorkingset + 1;
+    struct Cmd {
+        Op op = Op::GetRecord;
+        uint8_t ch = 0;
+        std::string body; // for setters; empty = fixed body from the table
+    };
+    struct Poll {
+        Op op;
+        uint8_t ch;
+        uint32_t periodMs;
+        uint32_t due;
+    };
+    // fields protected from polls after a local change
+    enum Hold : uint8_t { H_IRIS, H_WB, H_TINT, H_GAIN, H_FPS, H_AIN0, H_AIN1, H_ALVL0, H_ALVL1, H_COUNT };
+
     static constexpr int kQueue = 8;
 
-    void enqueue(Op op);
+    void enqueue(Op op, uint8_t ch = 0, std::string body = std::string());
     bool queued(Op op) const;
-    void startRequest(Op op, bool freshConn, uint32_t nowMs);
-    void handleOk(Op op, int status, const std::string& body, uint32_t nowMs);
+    void startRequest(const Cmd& cmd, bool freshConn, uint32_t nowMs);
+    void handleOk(const Cmd& cmd, int status, const std::string& body, uint32_t nowMs);
     void wentOnline(uint32_t nowMs);
     void wentOffline();
     void changed() { ++st_.seq; }
+    void hold(Hold h, uint32_t ms = 1200) { holdUntil_[h] = now_ + ms; }
+    bool held(Hold h) const { return (int32_t)(now_ - holdUntil_[h]) < 0; }
+    void pollSoon(Op op, uint8_t ch, uint32_t inMs);
 
     HttpClient http_;
     CamState st_;
+    uint32_t now_ = 0;
 
-    Op queue_[kQueue];
+    Cmd queue_[kQueue];
     int qHead_ = 0, qLen_ = 0;
-    uint32_t pollDue_[kPollCount] = {};
+    Poll polls_[14];
+    int pollCount_ = 0;
+    uint32_t holdUntil_[H_COUNT] = {};
 
     bool inFlight_ = false;
-    Op curOp_ = Op::GetRecord;
+    Cmd cur_;
     bool curFresh_ = false;
 
     // finished request, handled in poll() (not inside the HttpClient callback)
     bool haveDone_ = false;
-    Op doneOp_ = Op::GetRecord;
-    bool doneFresh_ = false;
     HttpResult doneResult_ = HttpResult::Pending;
     bool doneReused_ = false;
     int doneStatus_ = 0;
     std::string doneBody_;
+
+    std::string formatBody_; // last GET system/format, PUT back with a new frameRate
 
     int failures_ = 0;
     uint32_t nextProbeMs_ = 0;

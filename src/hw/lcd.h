@@ -7,7 +7,9 @@
 
 namespace lcd {
 
-void init();
+// `idle` is called while init waits for the panel (~300 ms), so USB keeps
+// being serviced; may be null
+void init(void (*idle)());
 void backlight(uint8_t percent);
 // starts sending the whole 240x240 RGB565 frame; false if still busy
 bool push(const uint16_t* fb);

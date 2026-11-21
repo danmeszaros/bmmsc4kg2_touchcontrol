@@ -2,6 +2,8 @@
 
 #include <initializer_list>
 
+#include "config.h"
+
 extern "C" {
 #include <hardware/dma.h>
 #include <hardware/gpio.h>
@@ -27,6 +29,14 @@ static constexpr uint32_t kSpiHz = 62500000; // clk_peri / 2
 namespace lcd {
 
 static int dma_ = -1;
+static void (*idle_)() = nullptr;
+
+static void wait(uint32_t ms) {
+    absolute_time_t until = make_timeout_time_ms(ms);
+    while (!time_reached(until)) {
+        if (idle_) idle_();
+    }
+}
 static bool inFlight_ = false;
 
 static void cmd(uint8_t c) {
@@ -48,7 +58,8 @@ static void reg(uint8_t c, std::initializer_list<uint8_t> d) {
     if (d.size()) data(d.begin(), d.size());
 }
 
-void init() {
+void init(void (*idle)()) {
+    idle_ = idle;
     spi_init(LCD_SPI, kSpiHz);
     spi_set_format(LCD_SPI, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
     gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
@@ -67,11 +78,11 @@ void init() {
 
     // hardware reset
     gpio_put(PIN_RST, 1);
-    sleep_ms(20);
+    wait(20);
     gpio_put(PIN_RST, 0);
-    sleep_ms(20);
+    wait(20);
     gpio_put(PIN_RST, 1);
-    sleep_ms(120);
+    wait(120);
 
     // register sequence from Waveshare's LCD_1in28.c (GC9A01)
     cmd(0xEF);
@@ -92,7 +103,8 @@ void init() {
     reg(0x8E, {0xFF});
     reg(0x8F, {0xFF});
     reg(0xB6, {0x00, 0x20});
-    reg(0x36, {0x08}); // MADCTL: BGR, normal orientation
+    // MADCTL: BGR + orientation (MV/MX/MY) from UI_ROTATION
+    reg(0x36, {UI_ROTATION == 90 ? 0x68 : UI_ROTATION == 180 ? 0xC8 : UI_ROTATION == 270 ? 0xA8 : 0x08});
     reg(0x3A, {0x05}); // 16 bit/pixel
     reg(0x90, {0x08, 0x08, 0x08, 0x08});
     reg(0xBD, {0x06});
@@ -123,9 +135,9 @@ void init() {
     cmd(0x35); // tearing effect line on
     cmd(0x21); // inversion on (this panel needs it)
     cmd(0x11); // sleep out
-    sleep_ms(120);
+    wait(120);
     cmd(0x29); // display on
-    sleep_ms(20);
+    wait(20);
 
     dma_ = dma_claim_unused_channel(true);
     dma_channel_config c = dma_channel_get_default_config(dma_);

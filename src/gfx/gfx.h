@@ -33,6 +33,9 @@ public:
     void fillCircle(int cx, int cy, int r, uint16_t c);
     // ring centred on the screen between radii rIn..rOut
     void ring(int rIn, int rOut, uint16_t c);
+    // part of a centred ring from angle a0 to a1 (degrees, 0 = 3 o'clock,
+    // clockwise, a1 > a0, may exceed 360)
+    void arc(int rIn, int rOut, float a0, float a1, uint16_t c);
 
     // text: x by `ha`, y = vertical middle of the font's ascent+descent (like
     // PIL anchor "m"); `bg` is the colour behind the text (for antialiasing)

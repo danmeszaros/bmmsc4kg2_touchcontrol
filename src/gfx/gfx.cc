@@ -66,6 +66,24 @@ void Canvas::ring(int rIn, int rOut, uint16_t c) {
     }
 }
 
+void Canvas::arc(int rIn, int rOut, float a0, float a1, uint16_t c) {
+    if (a1 <= a0) return;
+    const float ro2 = (float)rOut * rOut, ri2 = (float)rIn * rIn;
+    for (int y = CY - rOut; y <= CY + rOut; ++y) {
+        if (y < 0 || y >= H) continue;
+        float dy = (float)y + 0.5f - CY;
+        for (int x = CX - rOut; x <= CX + rOut; ++x) {
+            float dx = (float)x + 0.5f - CX;
+            float d2 = dx * dx + dy * dy;
+            if (d2 > ro2 || d2 < ri2) continue;
+            float a = std::atan2(dy, dx) * 57.29578f; // -180..180, clockwise (y down)
+            if (a < a0) a += 360.0f;
+            if (a < a0) a += 360.0f;
+            if (a <= a1 && x >= 0 && x < W) fb_[y * W + x] = c;
+        }
+    }
+}
+
 static inline uint16_t mix565(uint16_t fg, uint16_t bg, uint8_t a) {
     if (a >= 15) return fg;
     if (a == 0) return bg;

@@ -6,7 +6,7 @@ mkdir -p build out
 S=../src
 g++ -std=c++17 -Wall -Wextra -O1 -g -fsanitize=address,undefined \
     -I$S/camera -I$S/gfx -I$S/ui \
-    test_host.cc $S/camera/json.cc $S/gfx/gfx.cc $S/gfx/fonts_gen.cc $S/ui/format.cc $S/ui/ui.cc \
+    test_host.cc $S/camera/json.cc $S/gfx/gfx.cc $S/gfx/fonts_gen.cc $S/ui/format.cc $S/ui/ui.cc $S/ui/gesture.cc \
     -o build/test_host
 ./build/test_host out
 if python3 -c "import PIL" 2>/dev/null; then

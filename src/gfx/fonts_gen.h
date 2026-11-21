@@ -8,5 +8,11 @@ extern const Font font_11b; // DejaVuSans-Bold.ttf 11 px
 extern const Font font_12; // DejaVuSans.ttf 12 px
 extern const Font font_12b; // DejaVuSans-Bold.ttf 12 px
 extern const Font font_13b; // DejaVuSans-Bold.ttf 13 px
+extern const Font font_14; // DejaVuSans.ttf 14 px
+extern const Font font_15b; // DejaVuSans-Bold.ttf 15 px
+extern const Font font_16b; // DejaVuSans-Bold.ttf 16 px
 extern const Font font_20b; // DejaVuSans-Bold.ttf 20 px
+extern const Font font_22b; // DejaVuSans-Bold.ttf 22 px
+extern const Font font_34; // DejaVuSans.ttf 34 px
 extern const Font font_38b; // DejaVuSans-Bold.ttf 38 px
+extern const Font font_52b; // DejaVuSans-Bold.ttf 52 px

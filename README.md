@@ -14,9 +14,11 @@ the result is `docs/controller-guide.md`.
 - [x] Camera link: polling of record state, iris, WB, tint, gain, fps, remaining time; on connect auto exposure off + shutter 180°
 - [x] REC toggle and momentary AF on physical buttons
 - [x] Main screen (variant B from `docs/ui.md`), redrawn on change
-- [ ] Touch (CST816S) and edit screens: iris, WB + auto WB, base gain
-- [ ] Audio page, frame-rate page, swiping between pages
-- [ ] Not yet run on hardware
+- [x] Touch (CST816S, own tap / swipe / hold-repeat recognition), edit screens iris, WB + auto WB, base gain
+- [x] Audio page (input cycle, gain), frame-rate page (tap twice to apply), swiping, idle return to MAIN
+- [x] Display rotation as a build setting (`src/config.h`)
+- [x] On hardware: display, network, camera link (main screen with camera values)
+- [ ] On hardware: touch mapping, edit screens and pages against the camera, buttons
 
 ## Wiring
 

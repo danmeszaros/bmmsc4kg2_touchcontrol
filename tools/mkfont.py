@@ -13,15 +13,22 @@ TTF_DIR = "/usr/share/fonts/truetype/dejavu/"
 REGULAR = TTF_DIR + "DejaVuSans.ttf"
 BOLD = TTF_DIR + "DejaVuSans-Bold.ttf"
 
-# name, ttf, pixel size (same sizes as the mockups in docs/mockups)
+# name, ttf, pixel size (same sizes as the mockups in docs/mockups),
+# characters (None = all of CHARS)
 FONTS = [
-    ("font_10", REGULAR, 10),
-    ("font_11b", BOLD, 11),
-    ("font_12", REGULAR, 12),
-    ("font_12b", BOLD, 12),
-    ("font_13b", BOLD, 13),
-    ("font_20b", BOLD, 20),
-    ("font_38b", BOLD, 38),
+    ("font_10", REGULAR, 10, None),
+    ("font_11b", BOLD, 11, None),
+    ("font_12", REGULAR, 12, None),
+    ("font_12b", BOLD, 12, None),
+    ("font_13b", BOLD, 13, None),
+    ("font_14", REGULAR, 14, None),
+    ("font_15b", BOLD, 15, None),
+    ("font_16b", BOLD, 16, None),
+    ("font_20b", BOLD, 20, None),
+    ("font_22b", BOLD, 22, None),
+    ("font_34", REGULAR, 34, "+-−"),
+    ("font_38b", BOLD, 38, None),
+    ("font_52b", BOLD, 52, "f/0123456789.-K "),
 ]
 
 CHARS = sorted([chr(c) for c in range(32, 127)] + ["°", "·", "−", "▾", "↔"])  # sorted: binary search
@@ -31,11 +38,11 @@ OUT_H = os.path.join(ROOT, "src/gfx/fonts_gen.h")
 OUT_CC = os.path.join(ROOT, "src/gfx/fonts_gen.cc")
 
 
-def render_font(name, ttf, size):
+def render_font(name, ttf, size, chars=None):
     f = ImageFont.truetype(ttf, size)
     ascent, descent = f.getmetrics()
     glyphs, bits = [], bytearray()
-    for ch in CHARS:
+    for ch in (sorted(set(chars) | {"?"}) if chars else CHARS):
         adv = round(f.getlength(ch))
         x0, y0, x1, y1 = f.getbbox(ch, anchor="ls")  # relative to the baseline
         w, h = max(0, x1 - x0), max(0, y1 - y0)

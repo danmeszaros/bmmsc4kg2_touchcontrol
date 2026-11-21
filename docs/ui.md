@@ -12,10 +12,15 @@ least ~68 px (9 mm). Mockups: `mockups/` (rendered by `tools/render_mockups.py`)
 2. **AUDIO** (`mockups/P2_audio.png`)
    - Per channel (CH1 = API channel 0, CH2 = channel 1): tap the source to cycle
      CAM L → CAM R → JACK L → JACK R (`Camera - Left/Right`, `3.5mm Left/Right - Mic`).
-   - ± changes the gain of the selected channel. Gain range depends on the source
+   - Tap a row to select the channel; the round − / + buttons at the bottom change its
+     gain by 1 dB (hold to repeat). The narrow edge zones of the mockup were too small for a finger. Gain range depends on the source
      (internal −6…+6 dB, jack mic −10…+40 dB); the camera remembers gain per source.
    - Typical use: RODE Wireless GO (Gen 3) on the jack; split mode = TX1 left, TX2 right.
-3. **FRAME RATE** (`mockups/P3_fps.png`), rarely used. Shutter stays 180°.
+3. **FRAME RATE** (`mockups/P3_fps.png`), rarely used: first tap marks a rate, a second tap
+   within 3 s applies it. Shutter is set to 180° again after the change.
+
+After 15 s without touch every screen returns to MAIN. The red REC ring is shown on all screens.
+Firmware renders of every screen: `test/run.sh` → `test/out/*.png`.
 
 ## Edit screens (from MAIN, swipe down = back)
 

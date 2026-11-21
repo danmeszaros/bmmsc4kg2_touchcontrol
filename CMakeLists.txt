@@ -22,9 +22,12 @@ add_executable(touchcontrol_fw
     ${SRC}/gfx/fonts_gen.cc
     ${SRC}/ui/ui.cc
     ${SRC}/ui/format.cc
+    ${SRC}/ui/gesture.cc
+    ${SRC}/hw/touch.cc
     ${SRC}/hw/lcd.cc
     ${SRC}/hw/buttons.cc
     ${SRC}/hw/log.c
+    ${SRC}/hw/usb_diag.c
     ${SRC}/net/usb_network.c
     ${SRC}/net/usb_descriptors.c
     ${SRC}/net/http_client.cc
@@ -53,6 +56,7 @@ target_include_directories(touchcontrol_fw PRIVATE
 target_link_libraries(touchcontrol_fw
     pico_stdlib
     hardware_spi
+    hardware_i2c
     hardware_dma
     hardware_pio
     hardware_pwm
