@@ -121,7 +121,10 @@ int main() {
         // draw only when the previous frame has left the framebuffer
         if (dirty && !lcd::busy()) {
             drawnSeq = camera.state().seq;
+            const uint64_t t0 = time_us_64();
             screen.draw(canvas, camera.state(), now);
+            const uint32_t drawUs = (uint32_t)(time_us_64() - t0);
+            if (drawUs > 20000) printf("ui: slow redraw %lu ms (screen %d)\n", (unsigned long)(drawUs / 1000), (int)screen.screen());
             lcd::push(framebuffer);
             lastDraw = now;
             dirty = false;

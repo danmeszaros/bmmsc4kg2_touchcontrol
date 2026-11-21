@@ -67,19 +67,17 @@ void Canvas::ring(int rIn, int rOut, uint16_t c) {
 }
 
 void Canvas::arc(int rIn, int rOut, float a0, float a1, uint16_t c) {
+    // step along the angle and fill short radial lines: ~1000 sin/cos per
+    // arc instead of atan2 per pixel (no FPU on the RP2040)
     if (a1 <= a0) return;
-    const float ro2 = (float)rOut * rOut, ri2 = (float)rIn * rIn;
-    for (int y = CY - rOut; y <= CY + rOut; ++y) {
-        if (y < 0 || y >= H) continue;
-        float dy = (float)y + 0.5f - CY;
-        for (int x = CX - rOut; x <= CX + rOut; ++x) {
-            float dx = (float)x + 0.5f - CX;
-            float d2 = dx * dx + dy * dy;
-            if (d2 > ro2 || d2 < ri2) continue;
-            float a = std::atan2(dy, dx) * 57.29578f; // -180..180, clockwise (y down)
-            if (a < a0) a += 360.0f;
-            if (a < a0) a += 360.0f;
-            if (a <= a1 && x >= 0 && x < W) fb_[y * W + x] = c;
+    const float step = 0.25f; // < 1 px apart at r = 120
+    for (float a = a0; a <= a1; a += step) {
+        const float rad = a * 0.017453293f;
+        const float cs = std::cos(rad), sn = std::sin(rad);
+        for (int r = rIn; r <= rOut; ++r) {
+            const int x = CX + (int)std::lround(cs * ((float)r - 0.5f));
+            const int y = CY + (int)std::lround(sn * ((float)r - 0.5f));
+            if (x >= 0 && y >= 0 && x < W && y < H) fb_[y * W + x] = c;
         }
     }
 }
