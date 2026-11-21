@@ -154,7 +154,7 @@ void Camera::wentOffline() {
 
 void Camera::handleOk(Op op, int status, const std::string& body, uint32_t nowMs) {
     if (status >= 300) {
-        printf("cam: %s %s -> %d %s\n", kOps[(int)op].method, kOps[(int)op].path, status, body.c_str());
+        printf("cam: %s %s -> %d %.60s\n", kOps[(int)op].method, kOps[(int)op].path, status, body.c_str());
         return;
     }
     double d;

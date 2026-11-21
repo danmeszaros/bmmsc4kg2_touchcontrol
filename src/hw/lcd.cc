@@ -10,14 +10,17 @@ extern "C" {
 #include <pico/stdlib.h>
 }
 
-// pins from the SDK board header (waveshare_rp2040_touch_lcd_1.28.h)
+// Pins from Waveshare's DEV_Config.h for the RP2040-Touch-LCD-1.28. Not from
+// the SDK board header: that one says RST = GP12, but on the touch board GP12
+// is MISO and the reset is GP13 (with 12 the panel stays in reset: backlight
+// on, screen black).
 #define LCD_SPI spi1
-static constexpr uint PIN_DC = WAVESHARE_LCD_DC_PIN;     // 8
-static constexpr uint PIN_CS = WAVESHARE_LCD_CS_PIN;     // 9
-static constexpr uint PIN_SCK = WAVESHARE_LCD_SCLK_PIN;  // 10
-static constexpr uint PIN_MOSI = WAVESHARE_LCD_TX_PIN;   // 11
-static constexpr uint PIN_RST = WAVESHARE_LCD_RST_PIN;   // 12
-static constexpr uint PIN_BL = WAVESHARE_LCD_BL_PIN;     // 25
+static constexpr uint PIN_DC = 8;
+static constexpr uint PIN_CS = 9;
+static constexpr uint PIN_SCK = 10;
+static constexpr uint PIN_MOSI = 11;
+static constexpr uint PIN_RST = 13;
+static constexpr uint PIN_BL = 25;
 
 static constexpr uint32_t kSpiHz = 62500000; // clk_peri / 2
 
