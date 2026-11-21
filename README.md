@@ -18,7 +18,18 @@ the result is `docs/controller-guide.md`.
 - [x] Audio page (input cycle, gain), frame-rate page (tap twice to apply), swiping, idle return to MAIN
 - [x] Display rotation as a build setting (`src/config.h`)
 - [x] On hardware: display, network, camera link (main screen with camera values)
-- [ ] On hardware: touch mapping, edit screens and pages against the camera, buttons
+- [x] On hardware: touch mapping (rotation 0, no mirroring), swipes, WB (+/-, AUTO), base gain
+
+## Next (state 2026-11-21)
+
+- Flash 004482e and retest IRIS (was unresponsive: the arc took too long to draw; fixed, not yet
+  tried). At 34 mm the lens is already at f/5.5, so "−" does nothing there.
+- Confirm the AUDIO page (input cycle, gain on the meter) and the FRAME RATE page on the camera.
+- Physical REC / AF buttons (GP16 / GP17), postponed.
+- The camera sometimes stops talking USB after a replug (VBUS on, no bus reset; log
+  `usb: not ready ... suspended=1`); only a camera power cycle helped. Try: re-attach (toggle the
+  USB pull-up) if not configured after a few seconds.
+- Not on GitHub yet.
 
 ## Wiring
 
