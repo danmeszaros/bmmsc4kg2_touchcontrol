@@ -81,9 +81,10 @@ static void map(int rx, int ry, int& x, int& y) {
     if (TOUCH_MIRROR_X) px = 239 - px;
     if (TOUCH_MIRROR_Y) py = 239 - py;
     switch (UI_ROTATION) {
-    case 90: x = 239 - py; y = px; break;
+    // must match MADCTL in lcd.cc: at 90 (MV|MX) screen (0,0) is the panel's top-right
+    case 90: x = py; y = 239 - px; break;
     case 180: x = 239 - px; y = 239 - py; break;
-    case 270: x = py; y = 239 - px; break;
+    case 270: x = 239 - py; y = px; break;
     default: x = px; y = py; break;
     }
 }

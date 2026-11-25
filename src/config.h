@@ -4,7 +4,7 @@
 // Display orientation, degrees clockwise: 0, 90, 180 or 270. Rotates the LCD
 // (MADCTL) and the touch coordinates together.
 #ifndef UI_ROTATION
-#define UI_ROTATION 0
+#define UI_ROTATION 90
 #endif
 
 // Touch panel axes relative to the LCD at rotation 0 (set once per board
