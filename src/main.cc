@@ -92,7 +92,7 @@ int main() {
 
         buttons::Events ev = buttons::poll(now);
         if (ev.pressed & (1u << buttons::REC)) camera.toggleRecord(now);
-        if (ev.pressed & (1u << buttons::AF)) camera.autoFocus();
+        if (ev.pressed & (1u << buttons::AF)) camera.autoFocus(now);
         if (ev.pressed & (1u << buttons::SPARE1)) printf("button: spare1 (GP%u)\n", buttons::kPins[buttons::SPARE1]);
         if (ev.pressed & (1u << buttons::SPARE2)) printf("button: spare2 (GP%u)\n", buttons::kPins[buttons::SPARE2]);
 

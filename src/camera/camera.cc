@@ -1,6 +1,7 @@
 #include "camera.h"
 
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -14,6 +15,12 @@ constexpr const char* kApi = "/control/api/v1/";
 constexpr uint32_t kTimeoutMs = 500;
 constexpr uint32_t kRecLockMs = 1500;     // after STOP (camera needs ~1.2 s)
 constexpr uint32_t kRecStartLockMs = 500; // after START
+constexpr uint32_t kNoteMs = 2500;         // on-screen diagnostic line
+// While recording only the record state is polled (to notice a stop on the
+// camera itself) plus the one read-back after each change from the touch UI;
+// media space etc. is on the camera's own viewfinder.
+constexpr uint32_t kRecPollMs = 1000;
+constexpr uint32_t kReadbackMs = 100;     // after the edit hold (iris lens needs ~0.3 s, hold is longer)
 constexpr uint32_t kProbeMs = 1000;       // while offline
 constexpr int kOfflineAfter = 3;          // consecutive failures
 
@@ -45,8 +52,9 @@ constexpr OpDef kOps[] = {
     {"PUT", "audio/channel/%d/input", nullptr},
     {"PUT", "audio/channel/%d/level", nullptr},
     {"PUT", "system/format", nullptr},
+    {"PUT", "system/format", nullptr}, // codec: same object, other field
 };
-static_assert(sizeof(kOps) / sizeof(kOps[0]) == 24, "kOps must match Camera::Op");
+static_assert(sizeof(kOps) / sizeof(kOps[0]) == 25, "kOps must match Camera::Op");
 
 const char* resultName(HttpResult r) {
     switch (r) {
@@ -119,9 +127,29 @@ bool Camera::queued(Op op) const {
     return inFlight_ && cur_.op == op;
 }
 
+bool Camera::readbackOf(Op set, uint8_t ch, Op& get, Hold& h) {
+    switch (set) {
+    case Op::PutIris: get = Op::GetIris; h = H_IRIS; return true;
+    case Op::PutWb: get = Op::GetWb; h = H_WB; return true;
+    case Op::PutGain: get = Op::GetGain; h = H_GAIN; return true;
+    case Op::PutFormat: get = Op::GetFormat; h = H_FPS; return true;
+    case Op::PutCodec: get = Op::GetFormat; h = H_CODEC; return true;
+    case Op::PutAudioInput: get = Op::GetAudioInput; h = (Hold)(H_AIN0 + ch); return ch < 2;
+    case Op::PutAudioLevel: get = Op::GetAudioLevel; h = (Hold)(H_ALVL0 + ch); return ch < 2;
+    default: return false;
+    }
+}
+
+uint32_t Camera::pollPeriod(const Poll& p) const {
+    return st_.recording && p.op == Op::GetRecord ? kRecPollMs : p.periodMs;
+}
+
 void Camera::pollSoon(Op op, uint8_t ch, uint32_t inMs) {
     for (int i = 0; i < pollCount_; ++i) {
-        if (polls_[i].op == op && polls_[i].ch == ch) polls_[i].due = now_ + inMs;
+        if (polls_[i].op == op && polls_[i].ch == ch) {
+            polls_[i].due = now_ + inMs;
+            polls_[i].soon = true;
+        }
     }
 }
 
@@ -141,7 +169,10 @@ void Camera::startRequest(const Cmd& cmd, bool freshConn, uint32_t nowMs) {
         cur_ = cmd;
         curFresh_ = freshConn;
         for (int i = 0; i < pollCount_; ++i) {
-            if (polls_[i].op == cmd.op && polls_[i].ch == cmd.ch) polls_[i].due = nowMs + polls_[i].periodMs;
+            if (polls_[i].op == cmd.op && polls_[i].ch == cmd.ch) {
+                polls_[i].due = nowMs + pollPeriod(polls_[i]);
+                polls_[i].soon = false;
+            }
         }
     }
 }
@@ -183,7 +214,10 @@ void Camera::wentOffline() {
     if (st_.online) printf("cam: offline\n");
     const bool link = st_.link;
     const uint32_t seq = st_.seq;
+    const CamState old = st_;
     st_ = CamState();
+    std::memcpy(st_.note, old.note, sizeof st_.note);
+    st_.noteUntilMs = old.noteUntilMs;
     st_.link = link;
     st_.seq = seq;
     qLen_ = 0;
@@ -193,15 +227,31 @@ void Camera::wentOffline() {
     changed();
 }
 
+const char* Camera::buttonOpName(Op op) {
+    switch (op) {
+    case Op::PutRecordOn: return "REC start";
+    case Op::PutRecordOff: return "REC stop";
+    case Op::PutAutoFocus: return "AF";
+    default: return nullptr;
+    }
+}
+
 void Camera::handleOk(const Cmd& cmd, int status, const std::string& body, uint32_t nowMs) {
     const Op op = cmd.op;
+    if (const char* n = buttonOpName(op)) note(nowMs, "%s -> %d", n, status);
+    Op get;
+    Hold h;
+    if (readbackOf(op, cmd.ch, get, h)) {
+        // read the setting back once the local edit hold is over (polled values
+        // are ignored before that); a rejected setter: right away
+        if (status >= 300) holdUntil_[h] = 0;
+        const int32_t left = (int32_t)(holdUntil_[h] - nowMs);
+        pollSoon(get, cmd.ch, (left > 0 ? (uint32_t)left : 0) + kReadbackMs);
+    }
     if (status >= 300) {
         printf("cam: %s %s -> %d %.60s\n", kOps[(int)op].method, pathOf(kOps[(int)op], cmd.ch).c_str(), status,
                body.c_str());
-        // a rejected setter: fetch the real value again
-        if (op == Op::PutAudioLevel) { holdUntil_[H_ALVL0 + cmd.ch] = 0; pollSoon(Op::GetAudioLevel, cmd.ch, 0); }
-        if (op == Op::PutAudioInput) { holdUntil_[H_AIN0 + cmd.ch] = 0; pollSoon(Op::GetAudioInput, cmd.ch, 0); }
-        if (op == Op::PutFormat) { holdUntil_[H_FPS] = 0; pollSoon(Op::GetFormat, 0, 0); }
+        if (op == Op::PutRecordOn) recStartFailed();
         return;
     }
     double d;
@@ -265,6 +315,10 @@ void Camera::handleOk(const Cmd& cmd, int status, const std::string& body, uint3
             std::snprintf(st_.fps, sizeof st_.fps, "%s", s.c_str());
             changed();
         }
+        if (!held(H_CODEC) && json::string(body, "codec", s) && s != st_.codec) {
+            std::snprintf(st_.codec, sizeof st_.codec, "%s", s.c_str());
+            changed();
+        }
         break;
     case Op::GetWorkingset:
         if (json::number(body, "remainingRecordTime", d) && st_.remainingSec != (int32_t)d) {
@@ -310,11 +364,9 @@ void Camera::handleOk(const Cmd& cmd, int status, const std::string& body, uint3
         }
         break;
     case Op::PutRecordOn:
+        break; // no media read while recording
     case Op::PutRecordOff:
         pollSoon(Op::GetWorkingset, 0, 0); // clip count / space changed
-        break;
-    case Op::PutIris:
-        pollSoon(Op::GetIris, 0, 400); // lens needs ~0.3 s
         break;
     case Op::PutAutoWb:
         holdUntil_[H_WB] = holdUntil_[H_TINT] = 0;
@@ -328,7 +380,9 @@ void Camera::handleOk(const Cmd& cmd, int status, const std::string& body, uint3
         break;
     case Op::PutFormat:
         enqueue(Op::PutShutter180); // the camera keeps the shutter time, not the angle
-        pollSoon(Op::GetFormat, 0, 300);
+        break;
+    case Op::PutCodec:
+        pollSoon(Op::GetWorkingset, 0, 500); // remaining time depends on the codec
         break;
     default:
         break;
@@ -350,11 +404,13 @@ void Camera::poll(uint32_t nowMs) {
         } else {
             printf("cam: %s %s failed: %s%s\n", kOps[(int)cmd.op].method, pathOf(kOps[(int)cmd.op], cmd.ch).c_str(),
                    resultName(doneResult_), doneReused_ ? " (reused conn)" : "");
+            if (const char* n = buttonOpName(cmd.op)) note(nowMs, "%s: %s", n, resultName(doneResult_));
             if (doneResult_ != HttpResult::LinkDown && doneReused_ && !curFresh_) {
                 // stale kept connection: retry once right away on a new one
                 startRequest(cmd, true, nowMs);
                 return;
             }
+            if (cmd.op == Op::PutRecordOn) recStartFailed();
             if (++failures_ >= kOfflineAfter && st_.online) wentOffline();
             nextProbeMs_ = nowMs + kProbeMs;
         }
@@ -385,6 +441,7 @@ void Camera::poll(uint32_t nowMs) {
     int best = -1;
     int32_t bestLate = -1;
     for (int i = 0; i < pollCount_; ++i) {
+        if (st_.recording && polls_[i].op != Op::GetRecord && !polls_[i].soon) continue;
         int32_t late = (int32_t)(nowMs - polls_[i].due);
         if (late >= 0 && late > bestLate) {
             best = i;
@@ -401,13 +458,18 @@ void Camera::poll(uint32_t nowMs) {
 
 void Camera::toggleRecord(uint32_t nowMs) {
     now_ = nowMs;
-    if (!st_.online) return;
+    if (!st_.online) {
+        note(nowMs, "REC: camera offline");
+        return;
+    }
     if ((int32_t)(nowMs - recLockUntilMs_) < 0 || queued(Op::PutRecordOn) || queued(Op::PutRecordOff)) {
         printf("cam: rec button ignored (busy)\n");
+        note(nowMs, "REC ignored (busy)");
         return;
     }
     const bool start = !st_.recording;
     enqueue(start ? Op::PutRecordOn : Op::PutRecordOff);
+    note(nowMs, start ? "REC start sent" : "REC stop sent");
     // optimistic: show the new state at once
     st_.recording = start;
     st_.recKnown = true;
@@ -419,10 +481,32 @@ void Camera::toggleRecord(uint32_t nowMs) {
     changed();
 }
 
-void Camera::autoFocus() {
-    if (!st_.online) return;
+void Camera::recStartFailed() {
+    // undo the optimistic START at once; the next poll shows the real state
+    st_.recording = false;
+    recLockUntilMs_ = 0;
+    pollSoon(Op::GetRecord, 0, 0);
+    changed();
+}
+
+void Camera::autoFocus(uint32_t nowMs) {
+    now_ = nowMs;
+    if (!st_.online) {
+        note(nowMs, "AF: camera offline");
+        return;
+    }
     enqueue(Op::PutAutoFocus);
+    note(nowMs, "AF sent");
     printf("cam: autofocus\n");
+}
+
+void Camera::note(uint32_t nowMs, const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(st_.note, sizeof st_.note, fmt, ap);
+    va_end(ap);
+    st_.noteUntilMs = nowMs + kNoteMs;
+    changed();
 }
 
 void Camera::setIris(float stop) {
@@ -485,21 +569,55 @@ void Camera::setAudioGain(int ch, float db) {
 
 void Camera::setFps(const char* fps) {
     if (!st_.online) return;
-    // the camera only accepts the complete format object: take the last GET
-    // and replace frameRate
-    std::string body = formatBody_;
-    size_t k = body.find("\"frameRate\"");
-    size_t q1 = k == std::string::npos ? k : body.find('"', body.find(':', k));
-    size_t q2 = q1 == std::string::npos ? q1 : body.find('"', q1 + 1);
-    if (q2 == std::string::npos) {
+    if (st_.recording) {
+        // the camera can't change the format mid-take
+        note(now_, "FPS: stop REC first");
+        return;
+    }
+    std::string body;
+    if (!formatWith("frameRate", fps, body)) {
         printf("cam: no format known yet, fps not set\n");
         pollSoon(Op::GetFormat, 0, 0);
         return;
     }
-    body.replace(q1 + 1, q2 - q1 - 1, fps);
     enqueue(Op::PutFormat, 0, body);
+    formatBody_ = body; // a quick second change builds on this one
     std::snprintf(st_.fps, sizeof st_.fps, "%s", fps);
     hold(H_FPS, 2000);
     printf("cam: fps %s\n", fps);
+    changed();
+}
+
+bool Camera::formatWith(const char* key, const char* value, std::string& out) const {
+    // the camera only accepts the complete format object: take the last GET
+    // and replace one string field
+    out = formatBody_;
+    const std::string k = std::string("\"") + key + "\"";
+    size_t at = out.find(k);
+    size_t colon = at == std::string::npos ? at : out.find(':', at + k.size());
+    size_t q1 = colon == std::string::npos ? colon : out.find('"', colon);
+    size_t q2 = q1 == std::string::npos ? q1 : out.find('"', q1 + 1);
+    if (q2 == std::string::npos) return false;
+    out.replace(q1 + 1, q2 - q1 - 1, value);
+    return true;
+}
+
+void Camera::setCodec(const char* codec) {
+    if (!st_.online) return;
+    if (st_.recording) {
+        note(now_, "BRAW: stop REC first");
+        return;
+    }
+    std::string body;
+    if (!formatWith("codec", codec, body)) {
+        printf("cam: no format known yet, codec not set\n");
+        pollSoon(Op::GetFormat, 0, 0);
+        return;
+    }
+    enqueue(Op::PutCodec, 0, body);
+    formatBody_ = body;
+    std::snprintf(st_.codec, sizeof st_.codec, "%s", codec);
+    hold(H_CODEC, 2000);
+    printf("cam: codec %s\n", codec);
     changed();
 }

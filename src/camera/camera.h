@@ -25,7 +25,9 @@ public:
 
     // buttons
     void toggleRecord(uint32_t nowMs);
-    void autoFocus();
+    void autoFocus(uint32_t nowMs);
+    // on-screen diagnostic line for a moment
+    void note(uint32_t nowMs, const char* fmt, ...) __attribute__((format(printf, 3, 4)));
 
     // CameraCtl (touch UI)
     void setIris(float stop) override;
@@ -35,6 +37,7 @@ public:
     void setAudioInput(int ch, const char* input) override;
     void setAudioGain(int ch, float db) override;
     void setFps(const char* fps) override;
+    void setCodec(const char* codec) override;
 
     const CamState& state() const { return st_; }
 
@@ -51,7 +54,7 @@ private:
         GetAutoExposure, PutAutoExposureOff, PutShutter180,
         // commands
         PutRecordOn, PutRecordOff, PutAutoFocus,
-        PutIris, PutWb, PutAutoWb, PutGain, PutAudioInput, PutAudioLevel, PutFormat,
+        PutIris, PutWb, PutAutoWb, PutGain, PutAudioInput, PutAudioLevel, PutFormat, PutCodec,
         Count
     };
     struct Cmd {
@@ -64,12 +67,18 @@ private:
         uint8_t ch;
         uint32_t periodMs;
         uint32_t due;
+        bool soon = false; // asked for by pollSoon (read-back): also runs while recording
     };
     // fields protected from polls after a local change
-    enum Hold : uint8_t { H_IRIS, H_WB, H_TINT, H_GAIN, H_FPS, H_AIN0, H_AIN1, H_ALVL0, H_ALVL1, H_COUNT };
+    enum Hold : uint8_t { H_IRIS, H_WB, H_TINT, H_GAIN, H_FPS, H_AIN0, H_AIN1, H_ALVL0, H_ALVL1, H_CODEC, H_COUNT };
 
     static constexpr int kQueue = 8;
 
+    uint32_t pollPeriod(const Poll& p) const;
+    // setter -> the poll that reads it back and the hold that guards it
+    static bool readbackOf(Op set, uint8_t ch, Op& get, Hold& h);
+    void recStartFailed(); // PUT record=true failed or was rejected
+    static const char* buttonOpName(Op op); // REC/AF requests get an on-screen result
     void enqueue(Op op, uint8_t ch = 0, std::string body = std::string());
     bool queued(Op op) const;
     void startRequest(const Cmd& cmd, bool freshConn, uint32_t nowMs);
@@ -80,6 +89,8 @@ private:
     void hold(Hold h, uint32_t ms = 1200) { holdUntil_[h] = now_ + ms; }
     bool held(Hold h) const { return (int32_t)(now_ - holdUntil_[h]) < 0; }
     void pollSoon(Op op, uint8_t ch, uint32_t inMs);
+    // last GET system/format with one string field replaced; false if unknown
+    bool formatWith(const char* key, const char* value, std::string& out) const;
 
     HttpClient http_;
     CamState st_;
@@ -102,7 +113,7 @@ private:
     int doneStatus_ = 0;
     std::string doneBody_;
 
-    std::string formatBody_; // last GET system/format, PUT back with a new frameRate
+    std::string formatBody_; // last GET system/format, PUT back with a new frameRate / codec
 
     int failures_ = 0;
     uint32_t nextProbeMs_ = 0;

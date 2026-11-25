@@ -101,6 +101,7 @@ struct FakeCam : CameraCtl {
     void setAudioInput(int ch, const char* in) override { calls.push_back("ain " + std::to_string(ch) + " " + in); }
     void setAudioGain(int ch, float d) override { calls.push_back("alvl " + std::to_string(ch) + " " + std::to_string((int)d)); }
     void setFps(const char* f) override { calls.push_back(std::string("fps ") + f); }
+    void setCodec(const char* f) override { calls.push_back(std::string("codec ") + f); }
 };
 
 static CamState sampleState() {
@@ -113,6 +114,7 @@ static CamState sampleState() {
     s.gainKnown = true; s.gain = 0;
     s.remainingSec = 6400;
     std::snprintf(s.fps, sizeof s.fps, "25");
+    std::snprintf(s.codec, sizeof s.codec, "BRaw:8_1");
     std::snprintf(s.audio[0].input, sizeof s.audio[0].input, "3.5mm Left - Mic");
     s.audio[0].inputKnown = s.audio[0].gainKnown = s.audio[0].rangeKnown = true;
     s.audio[0].gain = 20; s.audio[0].gainMin = -10; s.audio[0].gainMax = 40;
@@ -204,6 +206,16 @@ static void testUiFlow() {
     CHECK(cam.calls.size() > 1 && cam.calls[1] == "alvl 0 21");
     CHECK(cam.calls.size() > 2 && cam.calls[2] == "alvl 1 -1");
 
+    CHECK(ev(Type::SwipeLeft) && u.screen() == ui::Screen::Quality);
+    cam.calls.clear();
+    ev(Type::Tap, 166, 82 + 3 * 30); // bitrate list (camera is on 8:1): "12:1" pending
+    CHECK(cam.calls.empty());
+    ev(Type::Tap, 76, 157);          // QUALITY: only switches the list, clears pending
+    ev(Type::Tap, 166, 82 + 2 * 30); // "Q3": pending
+    CHECK(cam.calls.empty());
+    ev(Type::Tap, 166, 82 + 2 * 30); // second tap: apply
+    CHECK(cam.calls.size() == 1 && cam.calls[0] == "codec BRaw:Q3");
+
     CHECK(ev(Type::SwipeLeft) && u.screen() == ui::Screen::Fps);
     cam.calls.clear();
     ev(Type::Tap, 120 + 42, 72 + 2 * 32); // "50": pending
@@ -211,6 +223,7 @@ static void testUiFlow() {
     ev(Type::Tap, 120 + 42, 72 + 2 * 32); // second tap: apply
     CHECK(cam.calls.size() == 1 && cam.calls[0] == "fps 50");
     CHECK(!ev(Type::SwipeLeft));
+    CHECK(ev(Type::SwipeRight) && u.screen() == ui::Screen::Quality);
     CHECK(ev(Type::SwipeRight) && u.screen() == ui::Screen::Audio);
 
     t += ui::Ui::kIdleBackMs + 1;
@@ -238,12 +251,30 @@ static void testRender(const char* outDir) {
     cases.push_back({"page_audio", ui::Screen::Audio, s});
     cases.push_back({"page_fps", ui::Screen::Fps, s});
     cases.push_back({"page_fps_rec", ui::Screen::Fps, r});
+    cases.push_back({"page_braw", ui::Screen::Quality, s});
+    CamState q = s; std::snprintf(q.codec, sizeof q.codec, "BRaw:Q1"); cases.push_back({"page_braw_q1", ui::Screen::Quality, q});
+    cases.push_back({"page_braw_rec", ui::Screen::Quality, r});
+    CamState qx = s; std::snprintf(qx.codec, sizeof qx.codec, "BRaw:18_1"); cases.push_back({"page_braw_other", ui::Screen::Quality, qx});
 
     for (auto& k : cases) {
         u.show(k.sc, 0);
         u.draw(c, k.st, 0);
         std::string p = std::string(outDir) + "/" + k.name + ".ppm";
         writePpm(p.c_str(), fb);
+    }
+    {
+        // BRAW page after taps: quality list shown while the camera is on 8:1, Q3 pending
+        FakeCam fc;
+        u.show(ui::Screen::Quality, 0);
+        gesture::Event e{};
+        e.type = gesture::Type::Tap; e.x = 76; e.y = 157;
+        u.onGesture(e, s, fc, 0);
+        std::string p = std::string(outDir) + "/page_braw_quality_list.ppm";
+        u.draw(c, s, 0); writePpm(p.c_str(), fb);
+        e.x = 166; e.y = 82 + 2 * 30;
+        u.onGesture(e, s, fc, 0);
+        p = std::string(outDir) + "/page_braw_pending.ppm";
+        u.draw(c, s, 0); writePpm(p.c_str(), fb);
     }
     u.show(ui::Screen::Main, 0);
     u.draw(c, r, 0);

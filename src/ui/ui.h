@@ -32,7 +32,7 @@ constexpr Rect kTileIris{34, 52, 206, 120};
 constexpr Rect kTileWb{32, 126, 118, 194};
 constexpr Rect kTileGain{122, 126, 208, 194};
 
-enum class Screen : uint8_t { Main, Audio, Fps, Iris, Wb, Gain };
+enum class Screen : uint8_t { Main, Audio, Fps, Quality, Iris, Wb, Gain };
 
 // audio input cycle for one channel (CAM L -> CAM R -> JACK L -> JACK R)
 constexpr int kAudioInputs = 4;
@@ -43,13 +43,18 @@ void audioLabel(char* out, size_t n, const char* input);
 constexpr int kFpsCount = 8;
 extern const char* const kFps[kFpsCount];
 
+// BRAW codecs: [0..3] constant bitrate (left column), [4..7] constant quality
+constexpr int kCodecCount = 8;
+extern const char* const kCodec[kCodecCount];      // API value, "BRaw:8_1"
+extern const char* const kCodecLabel[kCodecCount]; // "8:1"
+
 // third-stop f-number series; next/previous from the current value
 float irisStep(float stop, int dir);
 
 class Ui {
 public:
     static constexpr uint32_t kIdleBackMs = 15000; // back to MAIN without input
-    static constexpr uint32_t kFpsConfirmMs = 3000;
+    static constexpr uint32_t kConfirmMs = 3000; // FPS / BRAW: second tap within this
 
     void draw(gfx::Canvas& c, const CamState& s, uint32_t nowMs) const;
     // true if the screen needs a redraw
@@ -57,15 +62,17 @@ public:
     bool tick(uint32_t nowMs);
 
     Screen screen() const { return screen_; }
-    void show(Screen s, uint32_t nowMs) { screen_ = s; lastInput_ = nowMs; }
+    void show(Screen s, uint32_t nowMs) { screen_ = s; lastInput_ = nowMs; codecMode_ = -1; }
 
 private:
     bool onTap(int x, int y, bool repeat, const CamState& s, CameraCtl& cam, uint32_t nowMs);
 
     Screen screen_ = Screen::Main;
     int audioSel_ = 0;
-    int fpsPending_ = -1;
-    uint32_t fpsPendingUntil_ = 0;
+    // FPS / BRAW page: item marked by the first tap
+    int pending_ = -1;
+    uint32_t pendingUntil_ = 0;
+    int codecMode_ = -1; // BRAW page: 0 bitrate, 1 quality, -1 = the camera's current mode
     uint32_t lastInput_ = 0;
 };
 

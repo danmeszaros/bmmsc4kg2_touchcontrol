@@ -23,3 +23,13 @@
 #ifndef TOUCH_LOG
 #define TOUCH_LOG 1
 #endif
+
+// How the physical buttons are read:
+//   0 = polled from the main loop, 20 ms debounce (a press can be missed
+//       while the loop is busy)
+//   1 = GPIO interrupt, logic of the old bmmsc4kg2_control firmware: press on
+//       the first falling edge, re-armed 50 ms after the last rising edge
+//   2 = GPIO interrupt, reads the pin level, 20 ms lockout after each edge
+#ifndef BUTTONS_MODE
+#define BUTTONS_MODE 1
+#endif

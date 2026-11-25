@@ -35,9 +35,14 @@ struct CamState {
     int gain = 0;            // dB
 
     char fps[8] = "";        // as reported, e.g. "25"
+    char codec[16] = "";     // as reported, e.g. "BRaw:8_1" or "BRaw:Q3"
     int32_t remainingSec = -1; // remaining record time on the active disk
 
     AudioChannel audio[2];   // camera channel 1 = [0]
+
+    // short diagnostic line (button presses and their results), shown until noteUntilMs
+    char note[32] = "";
+    uint32_t noteUntilMs = 0;
 
     uint32_t seq = 0;        // bumped on every change (redraw trigger)
 };
@@ -54,4 +59,5 @@ public:
     virtual void setAudioInput(int ch, const char* input) = 0;
     virtual void setAudioGain(int ch, float db) = 0;
     virtual void setFps(const char* fps) = 0;
+    virtual void setCodec(const char* codec) = 0;
 };

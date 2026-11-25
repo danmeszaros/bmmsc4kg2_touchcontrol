@@ -16,8 +16,12 @@ least ~68 px (9 mm). Mockups: `mockups/` (rendered by `tools/render_mockups.py`)
      gain by 1 dB (hold to repeat). The narrow edge zones of the mockup were too small for a finger. Gain range depends on the source
      (internal −6…+6 dB, jack mic −10…+40 dB); the camera remembers gain per source.
    - Typical use: RODE Wireless GO (Gen 3) on the jack; split mode = TX1 left, TX2 right.
-3. **FRAME RATE** (`mockups/P3_fps.png`), rarely used: first tap marks a rate, a second tap
-   within 3 s applies it. Shutter is set to 180° again after the change.
+3. **BRAW** (render: `test/out/page_braw*.png`): left BITRATE / QUALITY picks which values
+   are listed (sends nothing); right 3:1 5:1 8:1 12:1 or Q0 Q1 Q3 Q5 (`codec` field of
+   `system/format`, e.g. `BRaw:8_1`, `BRaw:Q3`). First tap marks, second within 3 s applies.
+   Greyed out and locked while recording.
+4. **FRAME RATE** (`mockups/P3_fps.png`), rarely used: first tap marks a rate, a second tap
+   within 3 s applies it. Shutter is set to 180° again after the change. Greyed out and locked while recording.
 
 After 15 s without touch every screen returns to MAIN. The red REC ring is shown on all screens.
 Firmware renders of every screen: `test/run.sh` → `test/out/*.png`.
