@@ -196,7 +196,7 @@ static void testUiFlow() {
     cam.calls.clear();
     ev(Type::Tap, 110, 72);
     ev(Type::Tap, 120 + 42, 184);
-    ev(Type::Tap, 190, 128);
+    ev(Type::Tap, 110, 128); // pill of the other channel: focus only, no input change
     ev(Type::Tap, 120 - 42, 184);
     s.audio[1].gain = -6; ev(Type::Tap, 78, 184);
     CHECK(cam.calls.size() == 3);

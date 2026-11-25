@@ -386,8 +386,12 @@ bool Ui::onTap(int x, int y, bool repeat, const CamState& s, CameraCtl& cam, uin
         for (int ch = 0; ch < 2; ++ch) {
             const int ry = kAudioRowY[ch];
             if (y < ry - kAudioRowH0 || y >= ry + kAudioRowH1) continue;
-            audioSel_ = ch;
-            // the source pill (with some margin) cycles the input
+            // a tap on the other channel only moves the focus there
+            if (ch != audioSel_) {
+                audioSel_ = ch;
+                return true;
+            }
+            // on the focused channel the source pill (with some margin) cycles the input
             if (x >= kAudioPill.x0 - 10 && x < kAudioPill.x1 + 10) {
                 const AudioChannel& a = s.audio[ch];
                 int next = 0;
